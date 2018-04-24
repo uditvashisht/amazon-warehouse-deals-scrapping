@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-
+import os
 import requests
 from bs4 import BeautifulSoup
 import re
+from dotenv import load_dotenv, find_dotenv
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 # To pretend that we are browsing using a web-browser
 
@@ -17,7 +21,7 @@ BASE_URL = 'https://www.amazon.com/s/search-alias%3Dwarehouse-deals&field-keywor
 
 # search words to be separated by + sign instead of whitespace
 
-SEARCH_WORDS = "iphone"
+SEARCH_WORDS = "Huggies+Little+Movers"
 
 url = BASE_URL + SEARCH_WORDS
 
@@ -90,13 +94,18 @@ def scrap_data():
 
     resultCount, navPages = crunch_numbers()
     soup = create_soup(url)
-    nextUrl = soup.find("span", class_="pagnLink").find("a")["href"]
-    renameDicts = [{
-        "sr_pg_2": "sr_pg_" + str(i),
-        "page=2": "page=" + str(i)
-    } for i in range(2, navPages + 1)]
 
-    urlList = [get_url(nextUrl, dict) for dict in renameDicts]
+    try:
+        nextUrl = soup.find("span", class_="pagnLink").find("a")["href"]
+        renameDicts = [{
+            "sr_pg_2": "sr_pg_" + str(i),
+            "page=2": "page=" + str(i)
+        } for i in range(2, navPages + 1)]
+
+        urlList = [get_url(nextUrl, dict) for dict in renameDicts]
+
+    except AttributeError:
+        pass
 
     productName = []
     productLink = []
@@ -133,11 +142,67 @@ def scrap_data():
 
     finalDict = {
         name: [link, price]
-        for name, link, price in zip(productName, productLink,
-                                     productPrice)
+        for name, link, price in zip(productName, productLink, productPrice)
     }
 
     return finalDict
 
 
-scrap_data()
+def create_email_message():
+
+    finalDict = scrap_data()
+
+    notifyDict = {}
+
+    with open("email_message.txt", 'w') as f:
+
+        f.write("Dear User,\n\nFollowing deals are available now:\n\n")
+
+        for key, value in finalDict.items():
+            # Here we will search for certain keywords to refine our results
+            if "Size 4" in key:
+                notifyDict[key] = value
+
+        for key, value in notifyDict.items():
+            f.write("Product Name: " + key + "\n")
+            f.write("Link: " + value[0] + "\n")
+            f.write("Price: " + value[1] + "\n\n")
+
+        f.write("Yours Truly,\nPython Automation")
+
+    return notifyDict
+
+
+def notify_user():
+
+    load_dotenv(find_dotenv())
+    notifyDict = create_email_message()
+    emails = os.getenv("emails").split()
+
+    if notifyDict != {}:
+
+        s = smtplib.SMTP(host="smtp.gmail.com", port=587)
+        s.starttls()
+        s.login(os.getenv("MY_EMAIL_ADDRESS"), os.getenv("MY_PASSWORD"))
+
+        for email in emails:
+
+            msg = MIMEMultipart()
+
+            message = open("email_message.txt", "r").read()
+
+            msg['From'] = os.getenv("MY_EMAIL_ADDRESS")
+            msg['To'] = email
+            msg['Subject'] = "Hurry Up: Deals on Size-4 available."
+
+            msg.attach(MIMEText(message, 'plain'))
+
+            s.send_message(msg)
+
+            del msg
+
+        s.quit()
+
+
+if __name__ == '__main__':
+    notify_user()
